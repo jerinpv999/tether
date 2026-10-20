@@ -1,0 +1,45 @@
+{
+  "id": "device-telemetry",
+  "name": "Device telemetry (HTTP or MQTT)",
+  "description": "Started by POST /hooks/devices/:deviceId/telemetry or by an MQTT message on devices/<deviceId>/telemetry. Saves the reading, raises an alarm when it is too hot, and acknowledges on devices/<deviceId>/ack.",
+  "enabled": true,
+  "triggers": [
+    { "type": "http", "method": "POST", "path": "/devices/:deviceId/telemetry", "sync": true, "responseTimeoutMs": 10000, "instanceIdFrom": "body:messageId" },
+    { "type": "mqtt", "topic": "devices/+/telemetry", "qos": 1, "instanceIdFrom": "body:messageId" }
+  ],
+  "settings": { "maxSteps": 100 },
+  "nodes": [
+    { "id": "start", "type": "start", "name": "Telemetry in", "x": 40, "y": 160, "config": {} },
+    { "id": "normalize", "type": "activity", "name": "Normalize", "x": 280, "y": 160, "config": {
+      "kind": "transform", "outputVar": "reading",
+      "mapping": {
+        "deviceId": "{{ input.deviceId || trigger.topic.split('/')[1] }}",
+        "temperature": "{{ Number(input.temperature) }}",
+        "via": "{{ trigger.type }}",
+        "receivedAt": "{{ new Date().toISOString() }}"
+      } } },
+    { "id": "hot", "type": "decision", "name": "Too hot?", "x": 520, "y": 160, "config": { "condition": "vars.reading.temperature > 75" } },
+    { "id": "alarm", "type": "activity", "name": "Publish alarm", "x": 760, "y": 40, "config": {
+      "kind": "mqtt.publish", "topic": "alerts/{{ vars.reading.deviceId }}", "qos": 1,
+      "message": { "deviceId": "{{ vars.reading.deviceId }}", "temperature": "{{ vars.reading.temperature }}", "level": "critical" } } },
+    { "id": "save", "type": "activity", "name": "Save reading", "x": 760, "y": 160, "config": {
+      "kind": "db.write", "collection": "telemetry", "operation": "insert", "document": "{{ vars.reading }}" } },
+    { "id": "ack", "type": "activity", "name": "Ack to device", "x": 1000, "y": 160, "config": {
+      "kind": "mqtt.publish", "topic": "devices/{{ vars.reading.deviceId }}/ack", "qos": 1,
+      "message": { "messageId": "{{ workflow.instanceId }}", "status": "{{ vars.reading.temperature > 75 ? 'ALARM' : 'OK' }}" } } },
+    { "id": "reply", "type": "response", "name": "HTTP reply", "x": 1240, "y": 160, "config": {
+      "statusCode": 200,
+      "body": { "instanceId": "{{ workflow.instanceId }}", "deviceId": "{{ vars.reading.deviceId }}", "status": "{{ vars.reading.temperature > 75 ? 'ALARM' : 'OK' }}" } } },
+    { "id": "end", "type": "end", "name": "Done", "x": 1480, "y": 160, "config": { "output": "{{ vars.reading }}" } }
+  ],
+  "edges": [
+    { "from": "start", "to": "normalize" },
+    { "from": "normalize", "to": "hot" },
+    { "from": "hot", "to": "alarm", "port": "true" },
+    { "from": "hot", "to": "save", "port": "false" },
+    { "from": "alarm", "to": "save" },
+    { "from": "save", "to": "ack" },
+    { "from": "ack", "to": "reply" },
+    { "from": "reply", "to": "end" }
+  ]
+}

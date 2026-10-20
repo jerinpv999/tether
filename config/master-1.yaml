@@ -1,0 +1,33 @@
+# FlowForge MASTER node #1 – node-specific settings only.
+# Everything shared by the cluster lives in etcd/MongoDB (config/cluster.yaml, pushed with
+# `node bin/flowforge.js config push config/cluster.yaml --config config/master-1.yaml`).
+#   node bin/master.js --config config/master-1.yaml
+node:
+  id: master-1
+
+http:
+  host: 0.0.0.0
+  port: ${MASTER1_HTTP_PORT:-3000}
+  advertiseUrl: http://${ADVERTISE_HOST:-127.0.0.1}:${MASTER1_HTTP_PORT:-3000}
+
+grpc:
+  host: 0.0.0.0
+  port: ${MASTER1_GRPC_PORT:-50051}
+  advertiseAddress: ${ADVERTISE_HOST:-127.0.0.1}:${MASTER1_GRPC_PORT:-50051}
+  tls:
+    enabled: false
+    certFile: ./certs/master-1.crt
+    keyFile: ./certs/master-1.key
+    caFile: ./certs/ca.crt
+
+# Where the cluster-shared config document is kept.
+shared:
+  source: etcd                      # etcd | mongo
+  etcd:
+    hosts: [ "${ETCD_HOSTS:-127.0.0.1:2379}" ]
+    prefix: /flowforge/
+  # source: mongo
+  # mongo:
+  #   url: ${MONGO_URL:-mongodb://127.0.0.1:27017}
+  #   db: flowforge
+  waitMs: 30000                     # on a fresh cluster, wait this long for the first push

@@ -1,0 +1,143 @@
+{
+  "id": "payment-saga",
+  "name": "Payment saga (sub-workflow + events)",
+  "description": "Starts the order-approval workflow as a child, then waits for a payment.confirmed RabbitMQ event for the same order. A 'cancel' signal interrupts at any time.",
+  "enabled": true,
+  "triggers": [
+    {
+      "type": "rabbitmq",
+      "exchange": "checkout",
+      "routingKey": "checkout.started",
+      "queue": "flowforge.payment-saga",
+      "instanceIdFrom": "body:sagaId"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "Checkout",
+      "x": 40,
+      "y": 160,
+      "config": {}
+    },
+    {
+      "id": "order",
+      "type": "subworkflow",
+      "name": "Run order-approval",
+      "x": 280,
+      "y": 160,
+      "config": {
+        "workflowId": "order-approval",
+        "wait": true,
+        "timeoutMs": 60000,
+        "outputVar": "order",
+        "input": {
+          "orderId": "{{ input.orderId }}",
+          "items": "{{ input.items }}"
+        }
+      }
+    },
+    {
+      "id": "pay",
+      "type": "activity",
+      "name": "Wait payment.confirmed",
+      "x": 540,
+      "y": 160,
+      "config": {
+        "kind": "event.receive",
+        "source": "rabbitmq",
+        "rxExchange": "payments",
+        "rxRoutingKey": "payment.confirmed",
+        "filter": "event.orderId === input.orderId",
+        "timeoutMs": 30000,
+        "outputVar": "payment"
+      }
+    },
+    {
+      "id": "done",
+      "type": "end",
+      "name": "Paid",
+      "x": 800,
+      "y": 100,
+      "config": {
+        "output": {
+          "order": "{{ vars.order }}",
+          "payment": "{{ vars.payment }}"
+        }
+      }
+    },
+    {
+      "id": "unpaid",
+      "type": "end",
+      "name": "Payment timeout",
+      "x": 800,
+      "y": 240,
+      "config": {
+        "status": "FAILED",
+        "error": "no payment within 30s"
+      }
+    },
+    {
+      "id": "orderFail",
+      "type": "end",
+      "name": "Order failed",
+      "x": 540,
+      "y": 20,
+      "config": {
+        "status": "FAILED",
+        "error": "{{ nodes.order.error }}"
+      }
+    },
+    {
+      "id": "cancel",
+      "type": "signal",
+      "name": "On cancel (interrupt)",
+      "x": 280,
+      "y": 360,
+      "config": {
+        "mode": "listen",
+        "signalName": "cancel"
+      }
+    },
+    {
+      "id": "cancelled",
+      "type": "end",
+      "name": "Cancelled",
+      "x": 540,
+      "y": 360,
+      "config": {
+        "status": "FAILED",
+        "error": "cancelled: {{ signals.cancel && signals.cancel.reason }}"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "order"
+    },
+    {
+      "from": "order",
+      "to": "pay"
+    },
+    {
+      "from": "order",
+      "to": "orderFail",
+      "port": "error"
+    },
+    {
+      "from": "pay",
+      "to": "done"
+    },
+    {
+      "from": "pay",
+      "to": "unpaid",
+      "port": "timeout"
+    },
+    {
+      "from": "cancel",
+      "to": "cancelled"
+    }
+  ]
+}

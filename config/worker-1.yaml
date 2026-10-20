@@ -1,0 +1,21 @@
+# FlowForge WORKER node #1 – node-specific settings only (shared settings come from etcd/MongoDB).
+#   node bin/worker.js --config config/worker-1.yaml
+node:
+  id: worker-1
+  tags: [ default, eu ]             # workflows can require tags via settings.workerTags
+
+grpc:                               # loopback server for this worker's workflow processes
+  host: 127.0.0.1
+  port: ${WORKER1_GRPC_PORT:-50061}
+
+http:                               # GET /health
+  port: ${WORKER1_HTTP_PORT:-3101}
+
+runtime:
+  maxConcurrent: 50                 # overrides the shared default for this machine
+
+shared:
+  source: etcd
+  etcd:
+    hosts: [ "${ETCD_HOSTS:-127.0.0.1:2379}" ]
+    prefix: /flowforge/

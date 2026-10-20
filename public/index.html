@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlowForge Designer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mark">⟁</span> FlowForge</div>
+    <div class="wf-picker">
+      <select id="wfSelect" title="Workflow"></select>
+      <span id="dirty" class="dirty" hidden>● unsaved</span>
+    </div>
+    <div class="actions">
+      <button id="btnNew" class="ghost" title="New workflow">New</button>
+      <button id="btnValidate" class="ghost" title="Validate">Validate</button>
+      <button id="btnSave" title="Save (Ctrl+S)">Save</button>
+      <button id="btnRun" class="accent" title="Start an instance">▶ Run</button>
+      <span class="sep"></span>
+      <button id="btnZoomOut" class="icon" title="Zoom out">−</button>
+      <button id="btnFit" class="icon" title="Fit to screen">⤢</button>
+      <button id="btnZoomIn" class="icon" title="Zoom in">+</button>
+      <span class="sep"></span>
+      <button id="btnCluster" class="ghost" title="Masters & workers">Cluster</button>
+      <button id="btnSettings" class="ghost" title="Log retention">Settings</button>
+      <button id="btnDelete" class="ghost danger" title="Delete workflow">Delete</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="palette" id="palette" aria-label="Node palette"></aside>
+
+    <section class="stage" id="stage">
+      <canvas id="canvas"></canvas>
+      <div class="hint" id="hint">Drag nodes from the left · drag from a right-hand port to another node to connect · Del removes · Alt/Space + drag pans · wheel zooms</div>
+      <div class="overlay-tag" id="overlayTag" hidden></div>
+    </section>
+
+    <aside class="inspector" id="inspector" aria-label="Properties"></aside>
+  </main>
+
+  <section class="drawer" id="drawer">
+    <div class="drawer-head">
+      <button id="drawerToggle" class="ghost small">▾ Instances</button>
+      <label class="small muted"><input type="checkbox" id="allWorkflows"> all workflows</label>
+      <select id="statusFilter" class="small">
+        <option value="">any status</option>
+        <option>RUNNING</option><option>WAITING</option><option>PAUSED</option><option>QUEUED</option>
+        <option>COMPLETED</option><option>FAILED</option><option>STOPPED</option><option>TERMINATED</option>
+      </select>
+      <button id="btnRefresh" class="ghost small">Refresh</button>
+      <span class="live" id="live">● live</span>
+    </div>
+    <div class="drawer-body">
+      <div class="inst-list" id="instList"></div>
+      <div class="inst-detail" id="instDetail"><div class="empty">Select an instance to see its activities, logs and request data.</div></div>
+    </div>
+  </section>
+
+  <dialog id="dlg"><form method="dialog" id="dlgForm"></form></dialog>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="/vendor/fabric.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────────────────
+# FlowForge CLUSTER-SHARED configuration – stored in etcd or MongoDB.
+#
+#   node bin/flowforge.js config push config/cluster.yaml --config config/master-1.yaml
+#   node bin/flowforge.js config pull --config config/master-1.yaml
+#
+# Every node merges:  built-in defaults ← common ← master|worker ← its own YAML.
+# Running nodes watch this document; settings marked (live) apply immediately,
+# the rest are logged as "restart required".
+# ${VAR} / ${VAR:-default} references are resolved on each node from its env,
+# so secrets can stay in the environment instead of etcd/Mongo.
+# ─────────────────────────────────────────────────────────────────────────
+
+common:
+  security:
+    grpc:                                   # (live) Basic auth for all internal gRPC
+      username: flowforge
+      password: ${FLOWFORGE_GRPC_PASSWORD}
+      additionalUsers: []                   # (live) add the new pair here first when rotating
+  logs:
+    level: info                             # (live)
+
+master:
+  cluster:
+    enabled: true
+    coordinator: etcd                       # etcd | mongo – leader election + discovery
+    leaseTtlMs: 6000
+    workerLostGraceMs: 15000                # (live)
+    onWorkerLost: fail                      # (live) fail | restart
+    syncIntervalMs: 3000                    # (live)
+
+  store:                                    # workflows, instances, activities, requests, logs
+    type: etcd                              # etcd | mongo  (shared by all masters)
+    etcd:
+      hosts: [ "${ETCD_HOSTS:-127.0.0.1:2379}" ]
+      prefix: /flowforge/
+    mongo:
+      url: ${MONGO_URL:-mongodb://127.0.0.1:27017}
+      db: flowforge
+
+  dataDb:                                   # target of the db.write activity – shared, never local files
+    type: auto                              # auto | mongo | etcd
+    mongoUrl: ${DATA_MONGO_URL:-}           # set → MongoDB; empty → same backend as the store
+    mongoDb: flowforge_data
+
+  security:
+    api:                                    # (live) Basic auth for REST API + designer
+      enabled: false
+      username: admin
+      password: ${FLOWFORGE_API_PASSWORD:-admin}
+      protectHooks: false
+
+  rabbitmq:
+    url: ${RABBITMQ_URL:-}
+    prefetch: 10
+  mqtt:
+    url: ${MQTT_URL:-}
+    sharedGroup: flowforge
+
+  logs:
+    retentionHours: 168                     # (live) also settable via PUT /api/settings/log-retention
+    console: true
+
+  runtime:
+    defaultMaxOldSpaceMb: 256               # (live)
+    terminateGraceMs: 3000                  # (live)
+    instanceRetentionHours: 0               # (live)
+
+worker:
+  discovery:
+    type: etcd                              # etcd | mongo | static
+    etcd:
+      hosts: [ "${ETCD_HOSTS:-127.0.0.1:2379}" ]
+      prefix: /flowforge/
+    ttlMs: 6000
+  runtime:
+    maxConcurrent: 50                       # (live) default capacity per worker
+    childMaxOldSpaceMb: 256
+    terminateGraceMs: 3000
+    reconnectMs: 1000
+    bufferLimit: 50000                      # (live)
+    drainTimeoutMs: 60000                   # (live)

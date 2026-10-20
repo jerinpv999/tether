@@ -1,0 +1,225 @@
+{
+  "id": "order-approval",
+  "name": "Order approval",
+  "description": "HTTP order \u2192 totals \u2192 auto-approve small orders, wait for an 'approve' signal on large ones \u2192 save \u2192 publish event.",
+  "enabled": true,
+  "triggers": [
+    {
+      "type": "http",
+      "method": "POST",
+      "path": "/orders",
+      "sync": true,
+      "responseTimeoutMs": 15000,
+      "instanceIdFrom": "body:orderId"
+    }
+  ],
+  "settings": {
+    "maxSteps": 1000
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "Order received",
+      "x": 40,
+      "y": 140,
+      "config": {
+        "initVars": {
+          "approvedBy": null
+        }
+      }
+    },
+    {
+      "id": "total",
+      "type": "function",
+      "name": "Compute total",
+      "x": 280,
+      "y": 140,
+      "config": {
+        "code": "const items = input.items || [];\nvars.total = items.reduce((s, i) => s + (i.qty || 1) * i.price, 0);\nvars.orderId = input.orderId;\nlog('total is', vars.total);\nreturn { total: vars.total };"
+      }
+    },
+    {
+      "id": "big",
+      "type": "decision",
+      "name": "Total > 1000?",
+      "x": 520,
+      "y": 140,
+      "config": {
+        "condition": "vars.total > 1000"
+      }
+    },
+    {
+      "id": "ack",
+      "type": "response",
+      "name": "202 pending",
+      "x": 760,
+      "y": 60,
+      "config": {
+        "statusCode": 202,
+        "body": {
+          "orderId": "{{ vars.orderId }}",
+          "status": "PENDING_APPROVAL",
+          "instanceId": "{{ workflow.instanceId }}"
+        }
+      }
+    },
+    {
+      "id": "approval",
+      "type": "signal",
+      "name": "Wait for approve",
+      "x": 1000,
+      "y": 60,
+      "config": {
+        "mode": "wait",
+        "signalName": "approve",
+        "timeoutMs": 86400000,
+        "outputVar": "approval"
+      }
+    },
+    {
+      "id": "mark",
+      "type": "function",
+      "name": "Mark approved",
+      "x": 1240,
+      "y": 60,
+      "config": {
+        "code": "vars.approvedBy = (signals.approve && signals.approve.by) || 'unknown';\nreturn vars.approvedBy;"
+      }
+    },
+    {
+      "id": "save",
+      "type": "activity",
+      "name": "Save order",
+      "x": 520,
+      "y": 320,
+      "config": {
+        "kind": "db.write",
+        "collection": "orders",
+        "operation": "upsert",
+        "keyField": "orderId",
+        "document": {
+          "orderId": "{{ vars.orderId }}",
+          "total": "{{ vars.total }}",
+          "approvedBy": "{{ vars.approvedBy || 'auto' }}",
+          "savedAt": "{{ new Date().toISOString() }}"
+        }
+      }
+    },
+    {
+      "id": "publish",
+      "type": "activity",
+      "name": "Publish order.approved",
+      "x": 760,
+      "y": 320,
+      "config": {
+        "kind": "rabbitmq.publish",
+        "exchange": "orders",
+        "routingKey": "order.approved",
+        "message": {
+          "orderId": "{{ vars.orderId }}",
+          "total": "{{ vars.total }}"
+        },
+        "retries": 2
+      }
+    },
+    {
+      "id": "ok",
+      "type": "response",
+      "name": "200 approved",
+      "x": 1000,
+      "y": 320,
+      "config": {
+        "statusCode": 200,
+        "body": {
+          "orderId": "{{ vars.orderId }}",
+          "status": "APPROVED",
+          "total": "{{ vars.total }}"
+        }
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "name": "Done",
+      "x": 1240,
+      "y": 320,
+      "config": {
+        "status": "COMPLETED",
+        "output": {
+          "orderId": "{{ vars.orderId }}",
+          "total": "{{ vars.total }}",
+          "approvedBy": "{{ vars.approvedBy || 'auto' }}"
+        }
+      }
+    },
+    {
+      "id": "expired",
+      "type": "end",
+      "name": "Approval expired",
+      "x": 1240,
+      "y": -60,
+      "config": {
+        "status": "FAILED",
+        "error": "approval timed out"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "total",
+      "port": "out"
+    },
+    {
+      "from": "total",
+      "to": "big",
+      "port": "out"
+    },
+    {
+      "from": "big",
+      "to": "ack",
+      "port": "true"
+    },
+    {
+      "from": "big",
+      "to": "save",
+      "port": "false"
+    },
+    {
+      "from": "ack",
+      "to": "approval",
+      "port": "out"
+    },
+    {
+      "from": "approval",
+      "to": "mark",
+      "port": "out"
+    },
+    {
+      "from": "approval",
+      "to": "expired",
+      "port": "timeout"
+    },
+    {
+      "from": "mark",
+      "to": "save",
+      "port": "out"
+    },
+    {
+      "from": "save",
+      "to": "publish",
+      "port": "out"
+    },
+    {
+      "from": "publish",
+      "to": "ok",
+      "port": "out"
+    },
+    {
+      "from": "ok",
+      "to": "end",
+      "port": "out"
+    }
+  ]
+}

@@ -1,0 +1,150 @@
+{
+  "id": "sensor-alert",
+  "name": "Sensor alert (MQTT)",
+  "description": "MQTT reading \u2192 switch on severity \u2192 publish alert / debounce with delay \u2192 log reading to DB.",
+  "enabled": true,
+  "triggers": [
+    {
+      "type": "mqtt",
+      "topic": "sensors/+/reading",
+      "qos": 1
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "Reading",
+      "x": 40,
+      "y": 180,
+      "config": {}
+    },
+    {
+      "id": "classify",
+      "type": "activity",
+      "name": "Classify",
+      "x": 260,
+      "y": 180,
+      "config": {
+        "kind": "transform",
+        "outputVar": "reading",
+        "mapping": {
+          "sensor": "{{ trigger.topic.split('/')[1] }}",
+          "value": "{{ input.value }}",
+          "level": "{{ input.value > 80 ? 'critical' : input.value > 50 ? 'warning' : 'normal' }}"
+        }
+      }
+    },
+    {
+      "id": "route",
+      "type": "switch",
+      "name": "Severity",
+      "x": 480,
+      "y": 180,
+      "config": {
+        "expression": "vars.reading.level",
+        "cases": [
+          "critical",
+          "warning"
+        ]
+      }
+    },
+    {
+      "id": "alert",
+      "type": "activity",
+      "name": "Publish alarm",
+      "x": 740,
+      "y": 40,
+      "config": {
+        "kind": "mqtt.publish",
+        "topic": "alerts/{{ vars.reading.sensor }}",
+        "qos": 1,
+        "message": "{{ vars.reading }}"
+      }
+    },
+    {
+      "id": "debounce",
+      "type": "delay",
+      "name": "Debounce 2s",
+      "x": 740,
+      "y": 180,
+      "config": {
+        "duration": "2s"
+      }
+    },
+    {
+      "id": "store",
+      "type": "activity",
+      "name": "Store reading",
+      "x": 980,
+      "y": 180,
+      "config": {
+        "kind": "db.write",
+        "collection": "readings",
+        "operation": "insert",
+        "document": "{{ vars.reading }}"
+      }
+    },
+    {
+      "id": "join",
+      "type": "join",
+      "name": "Join",
+      "x": 1200,
+      "y": 180,
+      "config": {
+        "count": 1
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "name": "End",
+      "x": 1200,
+      "y": 320,
+      "config": {
+        "output": "{{ vars.reading }}"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "classify"
+    },
+    {
+      "from": "classify",
+      "to": "route"
+    },
+    {
+      "from": "route",
+      "to": "alert",
+      "port": "critical"
+    },
+    {
+      "from": "route",
+      "to": "debounce",
+      "port": "warning"
+    },
+    {
+      "from": "route",
+      "to": "store",
+      "port": "default"
+    },
+    {
+      "from": "alert",
+      "to": "store"
+    },
+    {
+      "from": "debounce",
+      "to": "store"
+    },
+    {
+      "from": "store",
+      "to": "join"
+    },
+    {
+      "from": "join",
+      "to": "end"
+    }
+  ]
+}

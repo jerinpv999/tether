@@ -1,0 +1,19 @@
+# FlowForge MASTER node #2 – node-specific settings only (shared settings come from etcd/MongoDB).
+node:
+  id: master-2
+
+http:
+  host: 0.0.0.0
+  port: ${MASTER2_HTTP_PORT:-3001}
+  advertiseUrl: http://${ADVERTISE_HOST:-127.0.0.1}:${MASTER2_HTTP_PORT:-3001}
+
+grpc:
+  host: 0.0.0.0
+  port: ${MASTER2_GRPC_PORT:-50052}
+  advertiseAddress: ${ADVERTISE_HOST:-127.0.0.1}:${MASTER2_GRPC_PORT:-50052}
+
+shared:
+  source: etcd
+  etcd:
+    hosts: [ "${ETCD_HOSTS:-127.0.0.1:2379}" ]
+    prefix: /flowforge/

@@ -1,0 +1,25 @@
+# Single box: one master with an embedded worker, JSON-file store, no cluster.
+#   node bin/master.js --config config/single-node.yaml
+node:
+  id: master-1
+
+http:
+  port: ${PORT:-3000}
+
+grpc:
+  host: 127.0.0.1
+  port: ${GRPC_PORT:-50051}
+
+security:
+  grpc:
+    username: flowforge
+    password: ${FLOWFORGE_GRPC_PASSWORD:-change-me}
+
+store:
+  type: file
+  file: { dir: ./data }
+
+runtime:
+  embeddedWorker:
+    enabled: true
+    maxConcurrent: 50

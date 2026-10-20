@@ -1,0 +1,71 @@
+# High-availability stack:
+#   etcd (election + discovery + store + shared config + db.write data) · 2 masters behind nginx · 2 workers
+#   config-init pushes config/cluster.yaml into etcd; every node YAML only holds its id/ports + `shared:`
+#   RabbitMQ · Mosquitto · MongoDB (data DB for db.write)
+#
+#   FLOWFORGE_GRPC_PASSWORD=$(openssl rand -hex 16) docker compose up --build
+#   UI / API: http://localhost:8080   (nginx → master-1 / master-2)
+#   More workers: copy a worker service and give it a new node id (ids must be unique)
+x-common-env: &common
+  FLOWFORGE_GRPC_USER: flowforge
+  FLOWFORGE_GRPC_PASSWORD: ${FLOWFORGE_GRPC_PASSWORD:-change-me}
+  ETCD_HOSTS: etcd:2379
+  RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+  MQTT_URL: mqtt://mosquitto:1883
+  DATA_MONGO_URL: mongodb://mongo:27017     # db.write → Mongo; leave unset to keep data in etcd
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.17
+    command: etcd --advertise-client-urls http://etcd:2379 --listen-client-urls http://0.0.0.0:2379
+
+  config-init:                       # one-shot: store the cluster-shared config in etcd
+    build: .
+    command: node bin/flowforge.js config push config/cluster.yaml --etcd etcd:2379 --force
+    depends_on: [etcd]
+    restart: on-failure
+
+  master-1:
+    build: .
+    command: node bin/master.js --config config/master-1.yaml
+    environment: { <<: *common, ADVERTISE_HOST: master-1 }
+    depends_on: [etcd, rabbitmq, mosquitto, mongo]
+    restart: unless-stopped
+
+  master-2:
+    build: .
+    command: node bin/master.js --config config/master-2.yaml
+    environment: { <<: *common, ADVERTISE_HOST: master-2 }
+    depends_on: [etcd, rabbitmq, mosquitto, mongo]
+    restart: unless-stopped
+
+  worker-1:
+    build: .
+    command: node bin/worker.js --config config/worker-1.yaml
+    environment: { <<: *common }
+    depends_on: [master-1, master-2]
+    stop_grace_period: 90s          # lets SIGTERM drain running workflows
+    restart: unless-stopped
+
+  worker-2:
+    build: .
+    command: node bin/worker.js --config config/worker-2.yaml
+    environment: { <<: *common }
+    depends_on: [master-1, master-2]
+    stop_grace_period: 90s
+    restart: unless-stopped
+
+  lb:
+    image: nginx:1.27-alpine
+    volumes: [ "./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro" ]
+    ports: [ "8080:80" ]
+    depends_on: [master-1, master-2]
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports: ["15672:15672"]
+  mosquitto:
+    image: eclipse-mosquitto:2
+    command: mosquitto -c /mosquitto-no-auth.conf
+  mongo:
+    image: mongo:7

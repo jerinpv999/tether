@@ -1,0 +1,178 @@
+syntax = "proto3";
+
+package orchestrator;
+
+// All services authenticate with HTTP Basic credentials in the `authorization`
+// metadata header ("Basic base64(user:pass)").
+//
+//   Orchestrator  hosted by a WORKER, dialled by its workflow child processes
+//                 (credentials = instanceId : per-child token)
+//   WorkerLink    hosted by every MASTER, dialled by workers (cluster credentials);
+//                 only the elected leader accepts, followers answer with a Redirect
+//   Peer          hosted by every MASTER, used by followers to forward runtime
+//                 calls to the leader and to watch its live events
+
+service Orchestrator {
+  rpc Connect (stream ChildMessage) returns (stream MasterMessage);
+}
+
+service WorkerLink {
+  rpc Attach (stream WorkerMessage) returns (stream LeaderMessage);
+}
+
+service Peer {
+  rpc Invoke (InvokeRequest) returns (InvokeReply);
+  rpc Watch  (WatchRequest)  returns (stream PeerEvent);
+}
+
+// ───────────── worker ⇄ leader ─────────────
+message WorkerMessage {
+  string worker_id = 1;
+  oneof body {
+    WorkerRegister register  = 10;
+    ChildEnvelope  child     = 11;  // relayed ChildMessage
+    Spawned        spawned   = 12;
+    Exited         exited    = 13;
+    WorkerBeat     heartbeat = 14;
+  }
+}
+
+message WorkerRegister {
+  repeated string tags      = 1;
+  int32  capacity           = 2;
+  string grpc_address       = 3;
+  string http_url           = 4;
+  repeated RunningChild running = 5;  // children that survived a leader failover
+  string version            = 6;
+  string hostname           = 7;
+}
+
+message RunningChild {
+  string instance_id        = 1;
+  int32  pid                = 2;
+  string subscriptions_json = 3;  // [{ id, spec }] active broker subscriptions to restore
+  bool   started            = 4;  // child already received its StartCommand
+}
+
+message ChildEnvelope { string instance_id = 1; ChildMessage msg = 2; }
+message Spawned       { string instance_id = 1; int32 pid = 2; }
+message Exited        { string instance_id = 1; int32 code = 2; string signal = 3; string error = 4; }
+message WorkerBeat    { int32 running = 1; int32 capacity = 2; bool draining = 3; double load = 4; int64 rss = 5; }
+
+message LeaderMessage {
+  oneof body {
+    Registered    registered = 1;
+    SpawnCommand  spawn      = 2;
+    MasterEnvelope to_child  = 3;
+    KillCommand   kill       = 4;
+    Redirect      redirect   = 5;
+  }
+}
+message Registered     { string leader_id = 1; int64 term = 2; }
+message SpawnCommand   { string instance_id = 1; int32 max_old_space_mb = 2; }
+message MasterEnvelope { string instance_id = 1; MasterMessage msg = 2; }
+message KillCommand    { string instance_id = 1; string signal = 2; }
+message Redirect       { string leader_id = 1; string leader_address = 2; string reason = 3; }
+
+// ───────────── master ⇄ master ─────────────
+message InvokeRequest { string op = 1; string args_json = 2; string from_node = 3; }
+message InvokeReply   { bool ok = 1; string result_json = 2; string error = 3; int32 status = 4; }
+message WatchRequest  { string from_node = 1; }
+message PeerEvent     { string type = 1; string data_json = 2; }
+
+// ───────────── child → master ─────────────
+message ChildMessage {
+  string instance_id = 1;
+  string token       = 2;   // per-process secret handed over via env
+  oneof body {
+    Hello          hello     = 10;
+    StatusUpdate   status    = 11;
+    ActivityUpdate activity  = 12;
+    LogEntry       log       = 13;
+    Request        request   = 14;  // ask master to do something (publish, db write, subscribe, sub-workflow)
+    ResponseOut    response  = 15;  // Response node → reply to the HTTP caller
+    Heartbeat      heartbeat = 16;
+  }
+}
+
+message Hello        { int32 pid = 1; }
+message Heartbeat    { int64 ts  = 1; }
+
+message StatusUpdate {
+  string status       = 1;  // RUNNING | WAITING | PAUSED | COMPLETED | FAILED | STOPPED | TERMINATED
+  string output_json  = 2;
+  string error        = 3;
+  string context_json = 4;  // variables snapshot
+  repeated string current_nodes = 5;
+}
+
+message ActivityUpdate {
+  string activity_id = 1;
+  string node_id     = 2;
+  string node_type   = 3;
+  string node_name   = 4;
+  string status      = 5;   // RUNNING | WAITING | COMPLETED | FAILED | SKIPPED | CANCELLED
+  string input_json  = 6;
+  string output_json = 7;
+  string error       = 8;
+  int32  attempt     = 9;
+  int64  started_at  = 10;
+  int64  ended_at    = 11;
+  string port        = 12;  // output port taken
+}
+
+message LogEntry {
+  string level   = 1;
+  string message = 2;
+  string node_id = 3;
+  string data_json = 4;
+}
+
+message Request {
+  string request_id   = 1;
+  string op           = 2;  // rabbit.publish | mqtt.publish | db.write | event.subscribe | event.unsubscribe | workflow.start
+  string payload_json = 3;
+}
+
+message ResponseOut {
+  int32  status_code  = 1;
+  string body_json    = 2;
+  string headers_json = 3;
+}
+
+// ───────────── master → child ─────────────
+message MasterMessage {
+  oneof body {
+    StartCommand   start   = 1;
+    ControlCommand control = 2;
+    Reply          reply   = 3;
+    EventDelivery  event   = 4;
+  }
+}
+
+message StartCommand {
+  string definition_json = 1;
+  string input_json      = 2;
+  string meta_json       = 3;  // workflowId, parentInstanceId, trigger info
+}
+
+message ControlCommand {
+  string action       = 1;  // STOP | TERMINATE | PAUSE | RESUME | SIGNAL
+  string signal_name  = 2;
+  string payload_json = 3;
+  string reason       = 4;
+}
+
+message Reply {
+  string request_id  = 1;
+  bool   ok          = 2;
+  string result_json = 3;
+  string error       = 4;
+}
+
+message EventDelivery {
+  string subscription_id = 1;
+  string payload_json    = 2;
+  string source          = 3;
+  string topic           = 4;
+}
